@@ -1,103 +1,187 @@
-import Image from "next/image";
+"use client";
+
+import { CubeTransparentIcon } from "@heroicons/react/24/solid";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 export default function Home() {
+  const [prices, setPrices] = useState<Record<string, number>>({});
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttempts = useRef(0);
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_DELAY = 3000;
+
+  const connectWebSocket = useCallback(() => {
+    // Clean up previous connection if exists
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+
+    const ws = new WebSocket("wss://ws.coinapi.io/v1/");
+    wsRef.current = ws;
+
+    ws.addEventListener("open", () => {
+      console.log("🔗 WebSocket connected for price feed");
+      reconnectAttempts.current = 0; // Reset reconnect attempts on successful connection
+
+      // Send authentication message with API key
+      const apiKey = "15f02f61-f1fe-498d-a19a-c041d345eb9d"; // Replace with your actual API key
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          apikey: apiKey,
+          heartbeat: true, // Enable heartbeat
+          subscribe_data_type: ["trade"],
+        })
+      );
+
+      // Subscribe to specific cryptocurrencies after connection
+      setTimeout(() => {
+        ["BTC", "ETH", "SOL"].forEach((symbol) => {
+          ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              assets: [`${symbol}USD`],
+              subscribe_data_type: ["trade"],
+              subscribe_filter_symbol_id: [`COINBASE_SPOT_${symbol}_USD$`],
+            })
+          );
+          console.log(`🔔 Subscribed to ${symbol}`);
+        });
+      }, 1000);
+    });
+
+    // Set up heartbeat ping to keep connection alive
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }));
+        console.log("🔄 Sending ping to keep connection alive");
+      }
+    }, 5000); // Send ping every 5 seconds
+
+    ws.addEventListener("message", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        // Handle different message types from CoinAPI
+        if (data.type === "trade") {
+          const symbol = data.symbol_id.split("_").slice(-2)[0]; // Extract symbol from COINBASE_SPOT_BTC_USD
+          const price = data.price;
+
+          console.log(`📈 ${symbol}: $${price}`);
+
+          // Update the price map
+          setPrices((prev) => ({
+            ...prev,
+            [symbol]: price,
+          }));
+        } else {
+          console.log("Other message type:", data.type, data);
+        }
+      } catch (err) {
+        console.error("⚠️ Invalid price update payload", err);
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      console.log("⚡️ WebSocket disconnected");
+      clearInterval(pingInterval);
+
+      // Try to reconnect if we haven't exceeded max attempts
+      if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+        console.log(
+          `🔄 Attempting to reconnect (${
+            reconnectAttempts.current + 1
+          }/${MAX_RECONNECT_ATTEMPTS})...`
+        );
+        reconnectAttempts.current += 1;
+
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, RECONNECT_DELAY);
+      } else {
+        console.error(
+          "❌ Maximum reconnection attempts reached. Please refresh the page."
+        );
+      }
+    });
+
+    ws.addEventListener("error", (error) => {
+      console.error("WebSocket Error:", error);
+    });
+
+    return () => {
+      clearInterval(pingInterval);
+      ws.close();
+      // Clean up reconnect timeout if it exists
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    connectWebSocket();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [connectWebSocket]);
+
+  // const sendSubscribe = (symbol: string) => {
+  //   if (wsRef.current?.readyState === WebSocket.OPEN) {
+  //     wsRef.current.send(
+  //       JSON.stringify({
+  //         type: "subscribe",
+  //         assets: [`${symbol}USD`],
+  //         subscribe_data_type: ["trade"],
+  //         subscribe_filter_symbol_id: [`COINBASE_SPOT_${symbol}_USD$`],
+  //       })
+  //     );
+  //   }
+  // };
+
   return (
     <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+      <CubeTransparentIcon className="size-12 text-black" />
+      <main className="p-4">
+        <h1 className="text-2xl font-semibold mb-4">Live Price Feed</h1>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
+        {/* <div className="flex space-x-2 mb-4">
+          {["BTC", "ETH", "SOL"].map((sym) => (
+            <button
+              key={sym}
+              className="px-3 py-1 rounded bg-blue-600 text-white"
+              onClick={() => sendSubscribe(sym)}
+            >
+              Subscribe {sym}
+            </button>
+          ))}
+        </div> */}
+
+        <ul className="space-y-2">
+          {Object.entries(prices)
+            .filter(([symbol]) => ["BTC", "ETH", "SOL"].includes(symbol))
+            .map(([symbol, price]) => (
+              <li key={symbol} className="flex justify-between border-b pb-1">
+                <span>{symbol}</span>
+                <span>${price.toFixed(2)}</span>
+              </li>
+            ))}
+          {Object.entries(prices).filter(([symbol]) =>
+            ["BTC", "ETH", "SOL"].includes(symbol)
+          ).length === 0 && (
+            <li className="text-gray-500">
+              No crypto price data yet. Click subscribe buttons above.
+            </li>
+          )}
+        </ul>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
