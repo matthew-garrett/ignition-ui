@@ -1,0 +1,9 @@
+export const ETHER_SCAN_BASE_URL = "https://etherscan.io/";
+export const ETHER_SCAN_TX_URL = `${ETHER_SCAN_BASE_URL}tx/`;
+export const ETHER_SCAN_ADDRESS_URL = `${ETHER_SCAN_BASE_URL}address/`;
+export const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
+export const ALCHEMY_URL = `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
+export const ALCHEMY_NFT_URL = `https://eth-mainnet.g.alchemy.com/nft/v2/${ALCHEMY_API_KEY}`;
+export const DUST_THRESHOLD = 0.00000000001;
+export const CACHE_DURATION = 30;
+export const TIMEOUT_MS = 5000;
